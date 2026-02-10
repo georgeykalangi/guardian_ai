@@ -36,3 +36,15 @@ class ApprovalRequired(DataGuardError):
 
 class ConnectionError(DataGuardError):
     """Raised when the DataGuard server is unreachable."""
+
+
+class CircuitBreakerOpen(DataGuardError):
+    """Raised when the circuit breaker is open due to consecutive failures."""
+
+    def __init__(self, failures: int, timeout: float) -> None:
+        self.failures = failures
+        self.timeout = timeout
+        super().__init__(
+            f"Circuit breaker open after {failures} consecutive failures. "
+            f"Will retry after {timeout}s."
+        )

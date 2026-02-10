@@ -1,10 +1,16 @@
 """Audit log query endpoints."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from guardian.db.repositories.audit_repo import AuditRepository
+from guardian.dependencies import get_audit_repo, verify_api_key
 from guardian.schemas.audit import AuditLogEntry, AuditQuery
 
-router = APIRouter(prefix="/v1/audit", tags=["audit"])
+router = APIRouter(
+    prefix="/v1/audit",
+    tags=["audit"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 @router.post(
@@ -12,7 +18,8 @@ router = APIRouter(prefix="/v1/audit", tags=["audit"])
     response_model=list[AuditLogEntry],
     summary="Query audit logs with filters",
 )
-async def query_audit_logs(query: AuditQuery) -> list[AuditLogEntry]:
-    # In v1 without full DB wiring, return empty
-    # Will be connected to AuditRepository when DB is available
-    return []
+async def query_audit_logs(
+    query: AuditQuery,
+    audit_repo: AuditRepository = Depends(get_audit_repo),
+) -> list[AuditLogEntry]:
+    return await audit_repo.query(query)

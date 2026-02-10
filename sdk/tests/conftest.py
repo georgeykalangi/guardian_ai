@@ -61,6 +61,7 @@ def client() -> GuardianClient:
         agent_id="test-agent",
         tenant_id="test-tenant",
         session_id="test-session",
+        api_key="test-key-123",
     )
 
 
@@ -71,5 +72,6 @@ def client_no_raise() -> GuardianClient:
         agent_id="test-agent",
         tenant_id="test-tenant",
         session_id="test-session",
+        api_key="test-key-123",
         raise_on_deny=False,
     )

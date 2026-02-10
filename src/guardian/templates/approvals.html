@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Pending Approvals - DataGuard{% endblock %}
+{% block content %}
+<h1>Pending Approvals</h1>
+
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Agent</th>
+            <th>Tool</th>
+            <th>Risk</th>
+            <th>Reason</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in pending %}
+        <tr>
+            <td>{{ entry.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ entry.agent_id }}</td>
+            <td>{{ entry.tool_name }}</td>
+            <td>{{ entry.risk_score_final }}</td>
+            <td>{{ entry.reason[:80] }}{% if entry.reason|length > 80 %}...{% endif %}</td>
+            <td>
+                <form method="post" action="/dashboard/approvals/{{ entry.decision_id }}/resolve" style="display:inline">
+                    <input type="hidden" name="approved" value="true">
+                    <button type="submit" class="outline" style="padding:0.25em 0.5em;margin:0">Approve</button>
+                </form>
+                <form method="post" action="/dashboard/approvals/{{ entry.decision_id }}/resolve" style="display:inline">
+                    <input type="hidden" name="approved" value="false">
+                    <button type="submit" class="outline secondary" style="padding:0.25em 0.5em;margin:0">Reject</button>
+                </form>
+            </td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="6">No pending approvals.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% endblock %}

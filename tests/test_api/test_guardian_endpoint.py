@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from guardian.main import app
+from tests.conftest import API_KEY_HEADER
 
 
 @pytest.fixture
@@ -15,6 +16,7 @@ class TestEvaluateEndpoint:
     def test_deny_rm_rf(self, client):
         response = client.post(
             "/v1/guardian/evaluate",
+            headers=API_KEY_HEADER,
             json={
                 "proposal": {
                     "tool_name": "bash",
@@ -35,6 +37,7 @@ class TestEvaluateEndpoint:
     def test_allow_safe_command(self, client):
         response = client.post(
             "/v1/guardian/evaluate",
+            headers=API_KEY_HEADER,
             json={
                 "proposal": {
                     "tool_name": "bash",
@@ -52,6 +55,7 @@ class TestEvaluateEndpoint:
     def test_rewrite_sudo(self, client):
         response = client.post(
             "/v1/guardian/evaluate",
+            headers=API_KEY_HEADER,
             json={
                 "proposal": {
                     "tool_name": "bash",
@@ -70,6 +74,7 @@ class TestEvaluateEndpoint:
     def test_require_approval_payment(self, client):
         response = client.post(
             "/v1/guardian/evaluate",
+            headers=API_KEY_HEADER,
             json={
                 "proposal": {
                     "tool_name": "stripe_charge",
@@ -89,6 +94,7 @@ class TestEvaluateEndpoint:
     def test_batch_evaluate(self, client):
         response = client.post(
             "/v1/guardian/evaluate-batch",
+            headers=API_KEY_HEADER,
             json=[
                 {
                     "proposal": {
@@ -115,6 +121,7 @@ class TestEvaluateEndpoint:
     def test_report_outcome(self, client):
         response = client.post(
             "/v1/guardian/report-outcome",
+            headers=API_KEY_HEADER,
             json={
                 "proposal_id": "test-123",
                 "tool_name": "bash",
@@ -127,6 +134,7 @@ class TestEvaluateEndpoint:
     def test_approve_nonexistent(self, client):
         response = client.post(
             "/v1/guardian/approve/nonexistent?approved=true&reviewer=admin",
+            headers=API_KEY_HEADER,
         )
         assert response.status_code == 404
 
@@ -144,7 +152,7 @@ class TestHealthEndpoints:
 
 class TestPoliciesEndpoint:
     def test_get_active_policy(self, client):
-        response = client.get("/v1/policies/active")
+        response = client.get("/v1/policies/active", headers=API_KEY_HEADER)
         assert response.status_code == 200
         data = response.json()
         assert data["policy_id"] == "default-v1"
