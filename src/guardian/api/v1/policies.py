@@ -2,11 +2,15 @@
 
 from fastapi import APIRouter, Depends
 
-from guardian.dependencies import get_orchestrator
+from guardian.dependencies import get_orchestrator, verify_api_key
 from guardian.engine.orchestrator import DecisionOrchestrator
 from guardian.schemas.policy import PolicySpec
 
-router = APIRouter(prefix="/v1/policies", tags=["policies"])
+router = APIRouter(
+    prefix="/v1/policies",
+    tags=["policies"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 @router.get(

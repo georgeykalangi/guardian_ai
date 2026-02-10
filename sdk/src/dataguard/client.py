@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
 import httpx
 
-from dataguard.exceptions import ApprovalRequired, ConnectionError, ToolBlocked
+from dataguard.exceptions import (
+    ApprovalRequired,
+    CircuitBreakerOpen,
+    ConnectionError,
+    ToolBlocked,
+)
 from dataguard.models import (
     DecisionVerdict,
     EvaluateRequest,
@@ -29,6 +35,10 @@ class GuardianClient:
         timeout: HTTP request timeout in seconds.
         raise_on_deny: If True (default), raise ToolBlocked on deny verdicts.
         session_id: Optional fixed session ID. Auto-generated if omitted.
+        api_key: API key for authentication. None = no auth header sent.
+        max_retries: Max retry attempts on transient failures (default 3).
+        circuit_breaker_threshold: Consecutive failures before circuit opens (default 5).
+        circuit_breaker_timeout: Seconds before circuit half-opens (default 30).
     """
 
     def __init__(
@@ -40,6 +50,10 @@ class GuardianClient:
         timeout: float = 5.0,
         raise_on_deny: bool = True,
         session_id: str | None = None,
+        api_key: str | None = None,
+        max_retries: int = 3,
+        circuit_breaker_threshold: int = 5,
+        circuit_breaker_timeout: float = 30.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.agent_id = agent_id
@@ -47,8 +61,39 @@ class GuardianClient:
         self.timeout = timeout
         self.raise_on_deny = raise_on_deny
         self.session_id = session_id or str(uuid.uuid4())
+        self.api_key = api_key
+        self.max_retries = max_retries
+        self.circuit_breaker_threshold = circuit_breaker_threshold
+        self.circuit_breaker_timeout = circuit_breaker_timeout
         self._async_client: httpx.AsyncClient | None = None
         self._sync_client: httpx.Client | None = None
+        # Circuit breaker state
+        self._consecutive_failures: int = 0
+        self._circuit_open_since: float | None = None
+
+    def _headers(self) -> dict[str, str]:
+        headers: dict[str, str] = {}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        return headers
+
+    def _check_circuit(self) -> None:
+        """Raise if circuit breaker is open; reset if timeout has elapsed."""
+        if self._circuit_open_since is None:
+            return
+        elapsed = time.monotonic() - self._circuit_open_since
+        if elapsed < self.circuit_breaker_timeout:
+            raise CircuitBreakerOpen(self._consecutive_failures, self.circuit_breaker_timeout)
+        # Half-open: allow one attempt, will reset on success or re-open on failure
+
+    def _record_success(self) -> None:
+        self._consecutive_failures = 0
+        self._circuit_open_since = None
+
+    def _record_failure(self) -> None:
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self.circuit_breaker_threshold:
+            self._circuit_open_since = time.monotonic()
 
     # -- Async API --
 
@@ -56,9 +101,30 @@ class GuardianClient:
     def async_client(self) -> httpx.AsyncClient:
         if self._async_client is None or self._async_client.is_closed:
             self._async_client = httpx.AsyncClient(
-                base_url=self.base_url, timeout=self.timeout
+                base_url=self.base_url, timeout=self.timeout, headers=self._headers()
             )
         return self._async_client
+
+    async def _request_with_retry(
+        self, method: str, url: str, **kwargs: Any
+    ) -> httpx.Response:
+        """Make an async HTTP request with retry and circuit breaker."""
+        self._check_circuit()
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = await getattr(self.async_client, method)(url, **kwargs)
+                self._record_success()
+                return resp
+            except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                last_exc = exc
+                self._record_failure()
+                if attempt < self.max_retries - 1:
+                    # Exponential backoff: 0.5s, 1s, 2s, ...
+                    import asyncio
+
+                    await asyncio.sleep(0.5 * (2**attempt))
+        raise ConnectionError(f"Cannot reach DataGuard at {self.base_url}") from last_exc
 
     async def evaluate(
         self,
@@ -73,13 +139,9 @@ class GuardianClient:
         request = self._build_request(
             tool_name, tool_args or {}, tool_category, intended_outcome, policy_id
         )
-        try:
-            resp = await self.async_client.post(
-                "/v1/guardian/evaluate",
-                json=request.model_dump(mode="json"),
-            )
-        except httpx.ConnectError as exc:
-            raise ConnectionError(f"Cannot reach DataGuard at {self.base_url}") from exc
+        resp = await self._request_with_retry(
+            "post", "/v1/guardian/evaluate", json=request.model_dump(mode="json")
+        )
         resp.raise_for_status()
         decision = GuardianDecision.model_validate(resp.json())
         return self._handle_verdict(decision)
@@ -90,11 +152,7 @@ class GuardianClient:
         *,
         policy_id: str | None = None,
     ) -> list[GuardianDecision]:
-        """Evaluate multiple proposals in one call.
-
-        Each item in *proposals* should have keys: tool_name, tool_args,
-        and optionally tool_category, intended_outcome.
-        """
+        """Evaluate multiple proposals in one call."""
         requests = [
             self._build_request(
                 p["tool_name"],
@@ -105,12 +163,9 @@ class GuardianClient:
             ).model_dump(mode="json")
             for p in proposals
         ]
-        try:
-            resp = await self.async_client.post(
-                "/v1/guardian/evaluate-batch", json=requests
-            )
-        except httpx.ConnectError as exc:
-            raise ConnectionError(f"Cannot reach DataGuard at {self.base_url}") from exc
+        resp = await self._request_with_retry(
+            "post", "/v1/guardian/evaluate-batch", json=requests
+        )
         resp.raise_for_status()
         decisions = [GuardianDecision.model_validate(d) for d in resp.json()]
         return [self._handle_verdict(d) for d in decisions]
@@ -132,13 +187,9 @@ class GuardianClient:
             response_data=response_data,
             error_message=error_message,
         )
-        try:
-            resp = await self.async_client.post(
-                "/v1/guardian/report-outcome",
-                json=report.model_dump(mode="json"),
-            )
-        except httpx.ConnectError as exc:
-            raise ConnectionError(f"Cannot reach DataGuard at {self.base_url}") from exc
+        resp = await self._request_with_retry(
+            "post", "/v1/guardian/report-outcome", json=report.model_dump(mode="json")
+        )
         resp.raise_for_status()
         return resp.json()
 
@@ -150,13 +201,11 @@ class GuardianClient:
         reviewer: str = "unknown",
     ) -> GuardianDecision:
         """Approve or reject a decision pending human review."""
-        try:
-            resp = await self.async_client.post(
-                f"/v1/guardian/approve/{decision_id}",
-                params={"approved": approved, "reviewer": reviewer},
-            )
-        except httpx.ConnectError as exc:
-            raise ConnectionError(f"Cannot reach DataGuard at {self.base_url}") from exc
+        resp = await self._request_with_retry(
+            "post",
+            f"/v1/guardian/approve/{decision_id}",
+            params={"approved": approved, "reviewer": reviewer},
+        )
         resp.raise_for_status()
         return GuardianDecision.model_validate(resp.json())
 
@@ -170,9 +219,27 @@ class GuardianClient:
     def sync_client(self) -> httpx.Client:
         if self._sync_client is None or self._sync_client.is_closed:
             self._sync_client = httpx.Client(
-                base_url=self.base_url, timeout=self.timeout
+                base_url=self.base_url, timeout=self.timeout, headers=self._headers()
             )
         return self._sync_client
+
+    def _request_with_retry_sync(
+        self, method: str, url: str, **kwargs: Any
+    ) -> httpx.Response:
+        """Make a sync HTTP request with retry and circuit breaker."""
+        self._check_circuit()
+        last_exc: Exception | None = None
+        for attempt in range(self.max_retries):
+            try:
+                resp = getattr(self.sync_client, method)(url, **kwargs)
+                self._record_success()
+                return resp
+            except (httpx.ConnectError, httpx.TimeoutException) as exc:
+                last_exc = exc
+                self._record_failure()
+                if attempt < self.max_retries - 1:
+                    time.sleep(0.5 * (2**attempt))
+        raise ConnectionError(f"Cannot reach DataGuard at {self.base_url}") from last_exc
 
     def evaluate_sync(
         self,
@@ -187,13 +254,9 @@ class GuardianClient:
         request = self._build_request(
             tool_name, tool_args or {}, tool_category, intended_outcome, policy_id
         )
-        try:
-            resp = self.sync_client.post(
-                "/v1/guardian/evaluate",
-                json=request.model_dump(mode="json"),
-            )
-        except httpx.ConnectError as exc:
-            raise ConnectionError(f"Cannot reach DataGuard at {self.base_url}") from exc
+        resp = self._request_with_retry_sync(
+            "post", "/v1/guardian/evaluate", json=request.model_dump(mode="json")
+        )
         resp.raise_for_status()
         decision = GuardianDecision.model_validate(resp.json())
         return self._handle_verdict(decision)

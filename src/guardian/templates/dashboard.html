@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Dashboard - DataGuard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+
+<div class="grid">
+    <article class="stat-card">
+        <h2>{{ stats.total_decisions }}</h2>
+        <p>Total Decisions (24h)</p>
+    </article>
+    <article class="stat-card">
+        <h2>{{ stats.pending_approvals }}</h2>
+        <p>Pending Approvals</p>
+    </article>
+    <article class="stat-card">
+        <h2>{{ stats.avg_risk_score }}</h2>
+        <p>Avg Risk Score</p>
+    </article>
+</div>
+
+<h2>Recent Decisions</h2>
+<figure>
+<table>
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Agent</th>
+            <th>Tool</th>
+            <th>Verdict</th>
+            <th>Risk</th>
+            <th>Reason</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for entry in decisions %}
+        <tr>
+            <td>{{ entry.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ entry.agent_id }}</td>
+            <td>{{ entry.tool_name }}</td>
+            <td><span class="badge badge-{{ entry.verdict }}">{{ entry.verdict }}</span></td>
+            <td>{{ entry.risk_score_final }}</td>
+            <td>{{ entry.reason[:80] }}{% if entry.reason|length > 80 %}...{% endif %}</td>
+        </tr>
+        {% else %}
+        <tr>
+            <td colspan="6">No decisions recorded yet.</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+</figure>
+{% endblock %}

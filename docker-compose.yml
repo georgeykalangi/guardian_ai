@@ -1,0 +1,30 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: guardian
+      POSTGRES_PASSWORD: guardian
+      POSTGRES_DB: guardian
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  server:
+    build: .
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+    environment:
+      GUARDIAN_DATABASE_URL: postgresql+asyncpg://guardian:guardian@db:5432/guardian
+      GUARDIAN_API_KEYS: ${GUARDIAN_API_KEYS:-}
+      GUARDIAN_LLM_PROVIDER: ${GUARDIAN_LLM_PROVIDER:-stub}
+      GUARDIAN_LLM_API_KEY: ${GUARDIAN_LLM_API_KEY:-}
+      GUARDIAN_LOG_LEVEL: ${GUARDIAN_LOG_LEVEL:-info}
+    command: >
+      sh -c "python -m alembic upgrade head &&
+             uvicorn guardian.main:app --host 0.0.0.0 --port 8000"
+
+volumes:
+  pgdata:

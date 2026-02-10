@@ -1,13 +1,22 @@
 """Guardian evaluation API router — the core of DataGuard."""
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from guardian.dependencies import get_orchestrator
+from guardian.db.repositories.audit_repo import AuditRepository
+from guardian.dependencies import get_audit_repo, get_orchestrator, verify_api_key
 from guardian.engine.orchestrator import DecisionOrchestrator
 from guardian.schemas.decision import GuardianDecision
 from guardian.schemas.tool_call import GuardianEvaluateRequest, ToolResponse
 
-router = APIRouter(prefix="/v1/guardian", tags=["guardian"])
+logger = logging.getLogger("guardian")
+
+router = APIRouter(
+    prefix="/v1/guardian",
+    tags=["guardian"],
+    dependencies=[Depends(verify_api_key)],
+)
 
 
 @router.post(
@@ -23,10 +32,15 @@ router = APIRouter(prefix="/v1/guardian", tags=["guardian"])
 async def evaluate_tool_call(
     request: GuardianEvaluateRequest,
     orchestrator: DecisionOrchestrator = Depends(get_orchestrator),
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ) -> GuardianDecision:
     decision = await orchestrator.evaluate(
         request.proposal, request.context, request.policy_id
     )
+    try:
+        await audit_repo.log_decision(decision, request.proposal, request.context)
+    except Exception:
+        logger.exception("Failed to persist audit log for decision %s", decision.decision_id)
     return decision
 
 
@@ -39,10 +53,15 @@ async def evaluate_tool_call(
 async def evaluate_batch(
     requests: list[GuardianEvaluateRequest],
     orchestrator: DecisionOrchestrator = Depends(get_orchestrator),
+    audit_repo: AuditRepository = Depends(get_audit_repo),
 ) -> list[GuardianDecision]:
     decisions = []
     for req in requests:
         decision = await orchestrator.evaluate(req.proposal, req.context, req.policy_id)
+        try:
+            await audit_repo.log_decision(decision, req.proposal, req.context)
+        except Exception:
+            logger.exception("Failed to persist audit log for decision %s", decision.decision_id)
         decisions.append(decision)
     return decisions
 
@@ -52,8 +71,14 @@ async def evaluate_batch(
     status_code=status.HTTP_202_ACCEPTED,
     summary="Report tool execution outcome for audit",
 )
-async def report_outcome(outcome: ToolResponse):
-    # In v1 without DB wiring, just acknowledge
+async def report_outcome(
+    outcome: ToolResponse,
+    audit_repo: AuditRepository = Depends(get_audit_repo),
+):
+    try:
+        await audit_repo.record_outcome(outcome)
+    except Exception:
+        logger.exception("Failed to record outcome for proposal %s", outcome.proposal_id)
     return {"status": "recorded", "proposal_id": outcome.proposal_id}
 
 

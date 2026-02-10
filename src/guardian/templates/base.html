@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}DataGuard{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        .badge {
+            display: inline-block;
+            padding: 0.15em 0.5em;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .badge-allow { background: #d4edda; color: #155724; }
+        .badge-deny { background: #f8d7da; color: #721c24; }
+        .badge-rewrite { background: #fff3cd; color: #856404; }
+        .badge-require_approval { background: #cce5ff; color: #004085; }
+        .stat-card {
+            text-align: center;
+            padding: 1rem;
+        }
+        .stat-card h2 {
+            margin-bottom: 0.25rem;
+            font-size: 2rem;
+        }
+        .stat-card p {
+            margin: 0;
+            color: var(--pico-muted-color);
+        }
+    </style>
+</head>
+<body>
+    <nav class="container">
+        <ul>
+            <li><strong>DataGuard</strong></li>
+        </ul>
+        <ul>
+            <li><a href="/dashboard/">Dashboard</a></li>
+            <li><a href="/dashboard/approvals">Approvals</a></li>
+        </ul>
+    </nav>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="container">
+        <small>DataGuard v0.1.0</small>
+    </footer>
+</body>
+</html>
