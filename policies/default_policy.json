@@ -1,0 +1,141 @@
+{
+  "policy_id": "default-v1",
+  "version": 1,
+  "description": "Default DataGuard policy — governs tool calls and outbound messages.",
+  "scope": ["tool_call", "message_send"],
+  "rules": [
+    {
+      "rule_id": "deny-rm-rf",
+      "description": "Block recursive force-delete commands",
+      "match": {
+        "tool_name": {"in": ["bash", "shell", "code_execution"]},
+        "tool_args_contains": {"pattern": "rm\\s+-(r|f|rf|fr)"}
+      },
+      "action": "deny",
+      "reason": "Recursive force-delete is unconditionally blocked."
+    },
+    {
+      "rule_id": "deny-drop-table",
+      "description": "Block DROP TABLE / DROP DATABASE",
+      "match": {
+        "tool_name": {"in": ["bash", "shell", "database", "sql"]},
+        "tool_args_contains": {"pattern": "(?i)(drop\\s+table|drop\\s+database)"}
+      },
+      "action": "deny",
+      "reason": "Destructive database operations require manual execution."
+    },
+    {
+      "rule_id": "deny-env-exfiltration",
+      "description": "Block dumping env vars to external endpoints",
+      "match": {
+        "tool_name": {"in": ["bash", "shell", "http_request"]},
+        "tool_args_contains": {"pattern": "(?i)(printenv|\\benv\\b).*curl|curl.*(env|printenv)"}
+      },
+      "action": "deny",
+      "reason": "Potential environment variable exfiltration detected."
+    },
+    {
+      "rule_id": "deny-secret-in-url",
+      "description": "Block URLs containing tokens or keys as query params",
+      "match": {
+        "tool_name": {"in": ["http_request", "http_fetch", "curl", "bash"]},
+        "tool_args_contains": {"pattern": "(?i)(api[_-]?key|token|secret|password)=\\S+"}
+      },
+      "action": "deny",
+      "reason": "Credentials must not be passed in URLs."
+    },
+    {
+      "rule_id": "require-approval-payment",
+      "description": "All payment tool calls need human approval",
+      "match": {
+        "tool_category": {"eq": "payment"}
+      },
+      "action": "require_approval",
+      "reason": "Payment actions require human-in-the-loop approval."
+    },
+    {
+      "rule_id": "require-approval-auth-changes",
+      "description": "Credential modifications require approval",
+      "match": {
+        "tool_category": {"eq": "auth"},
+        "tool_args_contains": {"pattern": "(?i)(password|secret|token|credential|api[_-]?key)"}
+      },
+      "action": "require_approval",
+      "reason": "Credential modifications require human approval."
+    },
+    {
+      "rule_id": "require-approval-mass-email",
+      "description": "Sending to >5 recipients requires approval",
+      "match": {
+        "tool_name": {"in": ["send_email", "message_send"]},
+        "tool_args_field_check": {
+          "field": "recipients",
+          "condition": "length_gt",
+          "value": 5
+        }
+      },
+      "action": "require_approval",
+      "reason": "Mass email sending requires human approval."
+    },
+    {
+      "rule_id": "require-approval-unknown-domain",
+      "description": "HTTP to non-allowlisted domains requires approval",
+      "match": {
+        "tool_name": {"in": ["http_request", "http_fetch", "curl"]},
+        "tool_args_field_check": {
+          "field": "url",
+          "condition": "domain_not_in",
+          "value": [
+            "api.openai.com",
+            "api.anthropic.com",
+            "github.com",
+            "api.github.com",
+            "localhost",
+            "127.0.0.1"
+          ]
+        }
+      },
+      "action": "require_approval",
+      "reason": "Outbound HTTP to unknown domains requires approval."
+    },
+    {
+      "rule_id": "rewrite-force-flags",
+      "description": "Strip --force / -f from shell commands",
+      "match": {
+        "tool_name": {"in": ["bash", "shell"]},
+        "tool_args_contains": {"pattern": "\\s--force\\b|\\s-f\\b"}
+      },
+      "action": "rewrite",
+      "reason": "Force flags removed for safety.",
+      "rewrite_rule_id": "strip-force-flags"
+    },
+    {
+      "rule_id": "rewrite-enforce-https",
+      "description": "Upgrade http:// to https://",
+      "match": {
+        "tool_name": {"in": ["http_request", "http_fetch", "curl"]},
+        "tool_args_contains": {"pattern": "http://(?!localhost|127\\.0\\.0\\.1)"}
+      },
+      "action": "rewrite",
+      "reason": "Upgraded to HTTPS for security.",
+      "rewrite_rule_id": "enforce-https"
+    },
+    {
+      "rule_id": "rewrite-sudo",
+      "description": "Strip sudo from commands",
+      "match": {
+        "tool_name": {"in": ["bash", "shell"]},
+        "tool_args_contains": {"pattern": "\\bsudo\\s"}
+      },
+      "action": "rewrite",
+      "reason": "sudo removed — operations should not require elevated privileges.",
+      "rewrite_rule_id": "neutralize-sudo"
+    }
+  ],
+  "risk_thresholds": {
+    "allow_max": 30,
+    "rewrite_confirm_min": 31,
+    "rewrite_confirm_max": 60,
+    "block_approval_min": 61
+  }
+}

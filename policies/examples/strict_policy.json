@@ -1,0 +1,78 @@
+{
+  "policy_id": "strict-v1",
+  "version": 1,
+  "description": "High-security policy example — blocks most write operations and requires approval for everything else.",
+  "scope": ["tool_call", "message_send"],
+  "rules": [
+    {
+      "rule_id": "deny-all-shell",
+      "description": "Block all shell/bash execution",
+      "match": {
+        "tool_name": {"in": ["bash", "shell", "code_execution", "exec"]}
+      },
+      "action": "deny",
+      "reason": "Shell execution is disabled in strict mode."
+    },
+    {
+      "rule_id": "deny-all-database-writes",
+      "description": "Block all database write operations",
+      "match": {
+        "tool_category": {"eq": "database"},
+        "tool_args_contains": {"pattern": "(?i)(INSERT|UPDATE|DELETE|ALTER|CREATE|DROP|TRUNCATE)"}
+      },
+      "action": "deny",
+      "reason": "Database writes are disabled in strict mode."
+    },
+    {
+      "rule_id": "deny-all-file-writes",
+      "description": "Block all filesystem write operations",
+      "match": {
+        "tool_category": {"eq": "file_system"}
+      },
+      "action": "deny",
+      "reason": "Filesystem writes are disabled in strict mode."
+    },
+    {
+      "rule_id": "require-approval-all-http",
+      "description": "All HTTP requests require human approval",
+      "match": {
+        "tool_category": {"eq": "http_request"}
+      },
+      "action": "require_approval",
+      "reason": "All outbound HTTP requests require approval in strict mode."
+    },
+    {
+      "rule_id": "require-approval-all-email",
+      "description": "All email sending requires approval",
+      "match": {
+        "tool_name": {"in": ["send_email", "message_send", "email"]}
+      },
+      "action": "require_approval",
+      "reason": "All outbound messages require approval in strict mode."
+    },
+    {
+      "rule_id": "require-approval-payment",
+      "description": "All payment operations require approval",
+      "match": {
+        "tool_category": {"eq": "payment"}
+      },
+      "action": "require_approval",
+      "reason": "Payment operations always require approval."
+    },
+    {
+      "rule_id": "require-approval-auth",
+      "description": "All auth operations require approval",
+      "match": {
+        "tool_category": {"eq": "auth"}
+      },
+      "action": "require_approval",
+      "reason": "Auth operations always require approval."
+    }
+  ],
+  "risk_thresholds": {
+    "allow_max": 15,
+    "rewrite_confirm_min": 16,
+    "rewrite_confirm_max": 40,
+    "block_approval_min": 41
+  }
+}
