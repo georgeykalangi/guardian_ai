@@ -86,6 +86,11 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Rate limiting (added before request logging so it fires first in Starlette's reverse order)
+    from guardian.middleware.rate_limiter import RateLimitMiddleware
+
+    app.add_middleware(RateLimitMiddleware, rpm=settings.rate_limit_rpm)
+
     # Request logging
     app.add_middleware(RequestLoggingMiddleware)
 

@@ -5,8 +5,12 @@ import os
 from pathlib import Path
 
 # Set env vars before any guardian imports so Settings picks them up
-os.environ.setdefault("GUARDIAN_API_KEYS", "test-key-123")
+os.environ.setdefault(
+    "GUARDIAN_API_KEYS",
+    "test-key-123,agent-key:tenant-a:agent,admin-key:tenant-b:admin",
+)
 os.environ.setdefault("GUARDIAN_DATABASE_URL", "sqlite+aiosqlite://")
+os.environ.setdefault("GUARDIAN_RATE_LIMIT_RPM", "0")  # Disable rate limiting for tests
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -20,6 +24,8 @@ from guardian.schemas.policy import PolicySpec
 from guardian.schemas.tool_call import ToolCallContext, ToolCallProposal
 
 API_KEY_HEADER = {"X-API-Key": "test-key-123"}
+AGENT_KEY_HEADER = {"X-API-Key": "agent-key"}
+ADMIN_KEY_HEADER = {"X-API-Key": "admin-key"}
 
 # In-memory async SQLite engine for tests
 _test_engine = create_async_engine("sqlite+aiosqlite://", echo=False)
@@ -52,6 +58,16 @@ def _override_db_dependency():
     app.dependency_overrides[get_db] = _override_get_db
     yield
     app.dependency_overrides.pop(get_db, None)
+
+
+@pytest.fixture(autouse=True)
+def _reset_orchestrator():
+    """Clear the orchestrator cache so each test gets a fresh instance."""
+    from guardian.dependencies import get_orchestrator
+
+    get_orchestrator.cache_clear()
+    yield
+    get_orchestrator.cache_clear()
 
 
 @pytest.fixture(autouse=True)
