@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
-from guardian.dependencies import get_orchestrator, verify_api_key
+from guardian.dependencies import get_orchestrator, require_admin, verify_api_key
 from guardian.engine.orchestrator import DecisionOrchestrator
 from guardian.schemas.policy import PolicySpec
 
@@ -28,6 +28,7 @@ async def get_active_policy(
     "/active",
     response_model=PolicySpec,
     summary="Replace the active policy",
+    dependencies=[Depends(require_admin)],
 )
 async def update_active_policy(
     policy: PolicySpec,

@@ -15,6 +15,7 @@ from guardian.db.session import get_db
 from guardian.engine.orchestrator import DecisionOrchestrator
 from guardian.engine.rewriter import init_default_rules
 from guardian.engine.risk_scorer import BaseRiskScorer, StubRiskScorer
+from guardian.schemas.auth import ApiKeyInfo, Role
 from guardian.schemas.policy import PolicySpec
 
 
@@ -59,13 +60,13 @@ async def get_audit_repo(session: AsyncSession = Depends(get_db)) -> AuditReposi
     return AuditRepository(session)
 
 
-async def verify_api_key(x_api_key: str | None = Header(default=None)) -> str | None:
-    """Validate the X-API-Key header.
+async def verify_api_key(x_api_key: str | None = Header(default=None)) -> ApiKeyInfo | None:
+    """Validate the X-API-Key header and return parsed key info.
 
     If no API keys are configured (empty string), auth is disabled (dev mode).
     """
-    configured_keys = settings.api_keys.strip()
-    if not configured_keys:
+    configured = settings.parse_api_keys()
+    if not configured:
         return None  # Dev mode: no auth required
 
     if not x_api_key:
@@ -74,10 +75,22 @@ async def verify_api_key(x_api_key: str | None = Header(default=None)) -> str | 
             detail="Missing API key. Provide X-API-Key header.",
         )
 
-    valid_keys = {k.strip() for k in configured_keys.split(",") if k.strip()}
-    if x_api_key not in valid_keys:
+    key_info = configured.get(x_api_key)
+    if key_info is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key.",
         )
-    return x_api_key
+    return key_info
+
+
+async def require_admin(key_info: ApiKeyInfo | None = Depends(verify_api_key)) -> ApiKeyInfo | None:
+    """Require admin role. Raises 403 if the key is agent-only."""
+    if key_info is None:
+        return None  # Dev mode
+    if key_info.role != Role.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required.",
+        )
+    return key_info

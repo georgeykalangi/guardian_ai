@@ -5,8 +5,9 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from guardian.db.repositories.audit_repo import AuditRepository
-from guardian.dependencies import get_audit_repo, get_orchestrator, verify_api_key
+from guardian.dependencies import get_audit_repo, get_orchestrator, require_admin, verify_api_key
 from guardian.engine.orchestrator import DecisionOrchestrator
+from guardian.schemas.auth import ApiKeyInfo
 from guardian.schemas.decision import GuardianDecision
 from guardian.schemas.tool_call import GuardianEvaluateRequest, ToolResponse
 
@@ -33,7 +34,11 @@ async def evaluate_tool_call(
     request: GuardianEvaluateRequest,
     orchestrator: DecisionOrchestrator = Depends(get_orchestrator),
     audit_repo: AuditRepository = Depends(get_audit_repo),
+    key_info: ApiKeyInfo | None = Depends(verify_api_key),
 ) -> GuardianDecision:
+    # Override tenant_id from API key if the key has a non-default tenant
+    if key_info and key_info.tenant_id != "default":
+        request.context.tenant_id = key_info.tenant_id
     decision = await orchestrator.evaluate(
         request.proposal, request.context, request.policy_id
     )
@@ -86,6 +91,7 @@ async def report_outcome(
     "/approve/{decision_id}",
     response_model=GuardianDecision,
     summary="Approve or reject a pending decision",
+    dependencies=[Depends(require_admin)],
 )
 async def approve_decision(
     decision_id: str,

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from guardian.db.session import get_db
+from guardian.dependencies import require_admin
 from guardian.models.audit_log import AuditLog
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -70,7 +71,7 @@ async def approvals_page(request: Request, session: AsyncSession = Depends(get_d
     )
 
 
-@router.post("/approvals/{decision_id}/resolve")
+@router.post("/approvals/{decision_id}/resolve", dependencies=[Depends(require_admin)])
 async def resolve_approval(
     decision_id: str,
     approved: str = Form(...),
