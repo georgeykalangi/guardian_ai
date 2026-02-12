@@ -8,7 +8,7 @@ from pytest_httpx import HTTPXMock
 
 from dataguard.client import GuardianClient
 from dataguard.exceptions import ApprovalRequired, CircuitBreakerOpen, ConnectionError, ToolBlocked
-from dataguard.models import DecisionVerdict
+from dataguard.models import DecisionVerdict, PolicySpec
 
 from .conftest import (
     ALLOW_DECISION,
@@ -312,3 +312,169 @@ class TestCircuitBreaker:
         decision = await c.evaluate("bash", {"command": "ls"})
         assert decision.verdict == DecisionVerdict.ALLOW
         assert c._consecutive_failures == 0
+
+
+# ---------------------------------------------------------------------------
+# Policy, Audit, Stats methods
+# ---------------------------------------------------------------------------
+
+SAMPLE_POLICY = {
+    "policy_id": "default-v1",
+    "version": 1,
+    "description": "Test policy",
+    "scope": ["tool_call"],
+    "rules": [],
+    "risk_thresholds": {
+        "allow_max": 30,
+        "rewrite_confirm_min": 31,
+        "rewrite_confirm_max": 60,
+        "block_approval_min": 61,
+    },
+}
+
+SAMPLE_AUDIT_ENTRY = {
+    "id": 1,
+    "decision_id": "dec-001",
+    "proposal_id": "prop-001",
+    "agent_id": "test-agent",
+    "session_id": "sess-001",
+    "tenant_id": "default",
+    "user_id": None,
+    "tool_name": "bash",
+    "tool_category": "code_execution",
+    "verdict": "allow",
+    "risk_score_final": 10,
+    "matched_rule_id": None,
+    "reason": "Low risk",
+    "requires_human": False,
+    "approved_by": None,
+    "outcome_success": True,
+    "created_at": "2025-01-01T00:00:00Z",
+}
+
+SAMPLE_STATS = {
+    "hours": 24,
+    "total_decisions": 42,
+    "by_verdict": {"allow": 30, "deny": 5, "rewrite": 7},
+    "pending_approvals": 3,
+    "avg_risk_score": 22.5,
+}
+
+
+class TestGetPolicy:
+    async def test_get_policy(self, client: GuardianClient, httpx_mock: HTTPXMock):
+        httpx_mock.add_response(
+            url="http://testserver/v1/policies/active",
+            json=SAMPLE_POLICY,
+        )
+        policy = await client.get_policy()
+        assert policy.policy_id == "default-v1"
+        assert policy.version == 1
+        assert len(policy.rules) == 0
+        assert policy.risk_thresholds.allow_max == 30
+
+    def test_get_policy_sync(self, client: GuardianClient, httpx_mock: HTTPXMock):
+        httpx_mock.add_response(
+            url="http://testserver/v1/policies/active",
+            json=SAMPLE_POLICY,
+        )
+        policy = client.get_policy_sync()
+        assert policy.policy_id == "default-v1"
+
+
+class TestUpdatePolicy:
+    async def test_update_policy(self, client: GuardianClient, httpx_mock: HTTPXMock):
+        updated = {**SAMPLE_POLICY, "version": 2, "description": "Updated"}
+        httpx_mock.add_response(
+            url="http://testserver/v1/policies/active",
+            json=updated,
+        )
+        new_policy = PolicySpec(**SAMPLE_POLICY)
+        new_policy.version = 2
+        new_policy.description = "Updated"
+        result = await client.update_policy(new_policy)
+        assert result.version == 2
+        assert result.description == "Updated"
+
+    async def test_update_sends_correct_payload(
+        self, client: GuardianClient, httpx_mock: HTTPXMock
+    ):
+        httpx_mock.add_response(
+            url="http://testserver/v1/policies/active",
+            json=SAMPLE_POLICY,
+        )
+        policy = PolicySpec(**SAMPLE_POLICY)
+        await client.update_policy(policy)
+        request = httpx_mock.get_request()
+        assert request.method == "PUT"
+        import json
+
+        body = json.loads(request.read())
+        assert body["policy_id"] == "default-v1"
+
+
+class TestQueryAudit:
+    async def test_query_audit(self, client: GuardianClient, httpx_mock: HTTPXMock):
+        httpx_mock.add_response(
+            url="http://testserver/v1/audit/query",
+            json=[SAMPLE_AUDIT_ENTRY, SAMPLE_AUDIT_ENTRY],
+        )
+        entries = await client.query_audit(verdict="allow", limit=10)
+        assert len(entries) == 2
+        assert entries[0].verdict == "allow"
+        assert entries[0].tool_name == "bash"
+
+    async def test_query_audit_empty(self, client: GuardianClient, httpx_mock: HTTPXMock):
+        httpx_mock.add_response(
+            url="http://testserver/v1/audit/query",
+            json=[],
+        )
+        entries = await client.query_audit(agent_id="nonexistent")
+        assert entries == []
+
+    async def test_query_audit_sends_filters(
+        self, client: GuardianClient, httpx_mock: HTTPXMock
+    ):
+        httpx_mock.add_response(
+            url="http://testserver/v1/audit/query",
+            json=[],
+        )
+        await client.query_audit(verdict="deny", tool_name="bash", limit=5)
+        request = httpx_mock.get_request()
+        import json
+
+        body = json.loads(request.read())
+        assert body["verdict"] == "deny"
+        assert body["tool_name"] == "bash"
+        assert body["limit"] == 5
+
+
+class TestGetStats:
+    async def test_get_stats(self, client: GuardianClient, httpx_mock: HTTPXMock):
+        httpx_mock.add_response(
+            url=httpx.URL("http://testserver/v1/stats/summary", params={"hours": "24"}),
+            json=SAMPLE_STATS,
+        )
+        stats = await client.get_stats()
+        assert stats.total_decisions == 42
+        assert stats.by_verdict["allow"] == 30
+        assert stats.pending_approvals == 3
+        assert stats.avg_risk_score == 22.5
+
+    async def test_get_stats_custom_hours(
+        self, client: GuardianClient, httpx_mock: HTTPXMock
+    ):
+        httpx_mock.add_response(
+            url=httpx.URL("http://testserver/v1/stats/summary", params={"hours": "48"}),
+            json={**SAMPLE_STATS, "hours": 48},
+        )
+        stats = await client.get_stats(hours=48)
+        assert stats.hours == 48
+
+    def test_get_stats_sync(self, client: GuardianClient, httpx_mock: HTTPXMock):
+        httpx_mock.add_response(
+            url=httpx.URL("http://testserver/v1/stats/summary", params={"hours": "24"}),
+            json=SAMPLE_STATS,
+        )
+        stats = client.get_stats_sync()
+        assert stats.total_decisions == 42

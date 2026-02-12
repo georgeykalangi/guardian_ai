@@ -147,3 +147,44 @@ class TestNeutralizeSudo:
             "neutralize-sudo", "bash", {"command": "sudo ls && sudo rm file"}
         )
         assert "sudo" not in result.rewritten_tool_args["command"]
+
+
+class TestRedactPII:
+    def test_ssn_redacted(self):
+        result = apply_rewrite(
+            "redact-pii", "custom_tool", {"data": "SSN: 123-45-6789"}
+        )
+        assert "123-45-6789" not in str(result.rewritten_tool_args)
+        assert "[SSN REDACTED]" in result.rewritten_tool_args["data"]
+
+    def test_email_redacted(self):
+        result = apply_rewrite(
+            "redact-pii", "custom_tool", {"data": "Contact user@example.com"}
+        )
+        assert "user@example.com" not in str(result.rewritten_tool_args)
+        assert "[EMAIL REDACTED]" in result.rewritten_tool_args["data"]
+
+    def test_phone_redacted(self):
+        result = apply_rewrite(
+            "redact-pii", "custom_tool", {"note": "Call (555) 123-4567"}
+        )
+        assert "(555) 123-4567" not in str(result.rewritten_tool_args)
+        assert "[PHONE REDACTED]" in result.rewritten_tool_args["note"]
+
+    def test_nested_pii(self):
+        result = apply_rewrite(
+            "redact-pii",
+            "custom_tool",
+            {"outer": {"inner": "SSN 123-45-6789", "list": ["email: a@b.com"]}},
+        )
+        args = result.rewritten_tool_args
+        assert "123-45-6789" not in str(args)
+        assert "a@b.com" not in str(args)
+        assert "[SSN REDACTED]" in args["outer"]["inner"]
+        assert "[EMAIL REDACTED]" in args["outer"]["list"][0]
+
+    def test_clean_args_preserved(self):
+        result = apply_rewrite(
+            "redact-pii", "custom_tool", {"data": "nothing sensitive here"}
+        )
+        assert result.rewritten_tool_args["data"] == "nothing sensitive here"
