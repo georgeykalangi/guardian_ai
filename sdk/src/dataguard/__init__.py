@@ -5,10 +5,14 @@ from dataguard.decorator import guard
 from dataguard.exceptions import ApprovalRequired, DataGuardError, ToolBlocked
 from dataguard.middleware import GuardianMiddleware
 from dataguard.models import (
+    AuditLogEntry,
+    AuditQuery,
     DecisionVerdict,
     GuardianDecision,
+    PolicySpec,
     RewrittenCall,
     RiskScore,
+    StatsSummary,
     ToolCallContext,
     ToolCallProposal,
     ToolCategory,
@@ -28,4 +32,8 @@ __all__ = [
     "GuardianDecision",
     "RewrittenCall",
     "RiskScore",
+    "PolicySpec",
+    "AuditLogEntry",
+    "AuditQuery",
+    "StatsSummary",
 ]

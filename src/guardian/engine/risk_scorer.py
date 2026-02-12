@@ -9,11 +9,14 @@ The stub returns safe defaults. Swap in a real LLM provider for fuzzy detection:
 
 from __future__ import annotations
 
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
 
+from guardian.engine.detectors import (
+    collect_all_text_fields,
+    scan_for_injection,
+    scan_for_pii,
+)
 from guardian.schemas.tool_call import ToolCallContext, ToolCallProposal
 
 
@@ -35,42 +38,38 @@ class BaseRiskScorer(ABC):
 
 
 # ---------------------------------------------------------------------------
-# Heuristic patterns used by both stub and real scorers
+# Heuristic scoring using shared detectors
 # ---------------------------------------------------------------------------
 
-_PII_PATTERNS = [
-    re.compile(r"\b\d{3}-\d{2}-\d{4}\b"),  # SSN
-    re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b"),  # email
-    re.compile(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b"),  # credit card
-    re.compile(r"(?i)\b(password|passwd|pwd)\s*[=:]\s*\S+"),
-]
 
-_INJECTION_PATTERNS = [
-    re.compile(r"(?i)ignore\s+(previous|all|prior)\s+(instructions?|prompts?)"),
-    re.compile(r"(?i)you\s+are\s+now\s+"),
-    re.compile(r"(?i)system\s*:\s*"),
-    re.compile(r"(?i)override\s+(instructions?|policy|rules?)"),
-    re.compile(r"(?i)forget\s+(everything|all|your\s+instructions?)"),
-]
-
-
-def _heuristic_score(proposal: ToolCallProposal) -> tuple[int, list[str]]:
+def _heuristic_score(
+    proposal: ToolCallProposal,
+    context: ToolCallContext | None = None,
+) -> tuple[int, list[str]]:
     """Quick regex-based risk assessment. Returns (score_delta, flags)."""
     score = 0
     flags: list[str] = []
-    serialized = str(proposal.tool_args)
 
-    for pattern in _PII_PATTERNS:
-        if pattern.search(serialized):
-            score += 20
-            flags.append("pii_detected")
-            break
+    all_text = collect_all_text_fields(
+        proposal.tool_args,
+        conversation_summary=context.conversation_summary if context else "",
+        intended_outcome=proposal.intended_outcome,
+    )
 
-    for pattern in _INJECTION_PATTERNS:
-        if pattern.search(serialized):
-            score += 40
-            flags.append("prompt_injection_suspected")
-            break
+    # PII detection
+    pii_result = scan_for_pii(all_text)
+    if pii_result.found:
+        unique_types = len(pii_result.pattern_ids)
+        score += 25  # base for any PII
+        if unique_types >= 2:
+            score += 5 * (unique_types - 1)  # extra per additional type
+        flags.append("pii_detected")
+
+    # Injection detection
+    injection_result = scan_for_injection(all_text)
+    if injection_result.found:
+        score += 65
+        flags.append("prompt_injection_suspected")
 
     # High-impact categories get a base bump
     if proposal.tool_category.value in ("payment", "auth"):
@@ -86,7 +85,7 @@ class StubRiskScorer(BaseRiskScorer):
     async def score(
         self, proposal: ToolCallProposal, context: ToolCallContext
     ) -> RiskAssessment:
-        heuristic_score, flags = _heuristic_score(proposal)
+        heuristic_score, flags = _heuristic_score(proposal, context)
 
         if heuristic_score == 0:
             return RiskAssessment(

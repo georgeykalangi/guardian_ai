@@ -27,7 +27,9 @@ from dataguard import GuardianClient, GuardianMiddleware, ToolBlocked, ApprovalR
 DATAGUARD_URL = os.getenv("DATAGUARD_URL", "http://localhost:8000")
 DATAGUARD_API_KEY = os.getenv("DATAGUARD_API_KEY", "")
 
-client = GuardianClient(base_url=DATAGUARD_URL, api_key=DATAGUARD_API_KEY)
+client = GuardianClient(
+    base_url=DATAGUARD_URL, agent_id="example-agent", api_key=DATAGUARD_API_KEY or None
+)
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +39,7 @@ client = GuardianClient(base_url=DATAGUARD_URL, api_key=DATAGUARD_API_KEY)
 # execution. If the call is denied, ToolBlocked is raised. If rewritten,
 # the modified arguments are passed to the function instead.
 
-@guard(client=client, tool_name="file_read", agent_id="example-agent")
+@guard(client=client, tool_name="file_read")
 def read_file(path: str) -> str:
     """Read a file from disk."""
     with open(path) as f:
@@ -60,8 +62,9 @@ def demo_decorator():
 # ---------------------------------------------------------------------------
 # Pattern 2: GuardianMiddleware for framework-level interception
 # ---------------------------------------------------------------------------
-# GuardianMiddleware wraps a callable so every invocation is governed.
-# This is useful when you have a generic tool executor.
+# GuardianMiddleware provides before/after hooks around tool calls.
+# Use before_tool_call() to evaluate, then execute, then after_tool_call()
+# to report the outcome for audit.
 
 def execute_shell(command: str) -> str:
     """Execute a shell command (example — do not use in production)."""
@@ -71,19 +74,18 @@ def execute_shell(command: str) -> str:
     return result.stdout
 
 
-guarded_shell = GuardianMiddleware(
-    client=client,
-    func=execute_shell,
-    tool_name="shell_exec",
-    agent_id="example-agent",
-)
+mw = GuardianMiddleware(client=client)
 
 
-def demo_middleware():
+async def demo_middleware():
     """Demonstrate the GuardianMiddleware pattern."""
     print("=== Pattern 2: GuardianMiddleware ===")
     try:
-        output = guarded_shell(command="echo hello")
+        tool_name, tool_args = await mw.before_tool_call(
+            "shell_exec", {"command": "echo hello"}
+        )
+        output = execute_shell(**tool_args)
+        await mw.after_tool_call(tool_name=tool_name, success=True)
         print(f"Output: {output.strip()}")
     except ToolBlocked as e:
         print(f"Blocked by policy: {e}")
@@ -107,7 +109,7 @@ def demo_langchain_tool():
         print("Install with: pip install langchain-core\n")
         return
 
-    @guard(client=client, tool_name="database_query", agent_id="example-agent")
+    @guard(client=client, tool_name="database_query")
     @tool
     def query_database(sql: str) -> str:
         """Run a SQL query against the application database."""
@@ -132,7 +134,7 @@ def demo_error_handling():
     """Show how to handle DataGuard errors gracefully."""
     print("=== Error Handling ===")
 
-    @guard(client=client, tool_name="dangerous_op", agent_id="example-agent")
+    @guard(client=client, tool_name="dangerous_op")
     def dangerous_operation(target: str) -> str:
         return f"Operated on {target}"
 
@@ -157,9 +159,15 @@ def demo_error_handling():
 # Main
 # ---------------------------------------------------------------------------
 
-if __name__ == "__main__":
+async def main():
     print("DataGuard + LangChain Integration Examples\n")
     demo_decorator()
-    demo_middleware()
+    await demo_middleware()
     demo_langchain_tool()
     demo_error_handling()
+
+
+if __name__ == "__main__":
+    import asyncio
+
+    asyncio.run(main())

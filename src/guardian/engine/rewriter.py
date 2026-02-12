@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from guardian.engine.detectors import redact_pii, scan_for_pii
 from guardian.schemas.rewrite import RewriteResult
 
 
@@ -311,12 +312,40 @@ def _neutralize_sudo_transform(
 
 
 # ---------------------------------------------------------------------------
+# Rule 11: redact-pii
+# Auto-redact PII (SSNs, emails, phones, etc.) found in tool args
+# ---------------------------------------------------------------------------
+
+
+def _redact_pii_applies(tool_name: str, args: dict[str, Any]) -> bool:
+    return scan_for_pii(str(args)).found
+
+
+def _redact_pii_value(value: Any) -> Any:
+    """Recursively walk a value and redact PII from all strings."""
+    if isinstance(value, str):
+        redacted, _ = redact_pii(value)
+        return redacted
+    if isinstance(value, dict):
+        return {k: _redact_pii_value(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_pii_value(item) for item in value]
+    return value
+
+
+def _redact_pii_transform(
+    tool_name: str, args: dict[str, Any]
+) -> tuple[str, dict[str, Any]]:
+    return tool_name, _redact_pii_value(args)
+
+
+# ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------
 
 
 def init_default_rules() -> None:
-    """Register all 10 default rewrite rules. Called at app startup."""
+    """Register all 11 default rewrite rules. Called at app startup."""
     rules = [
         RewriteRule(
             rule_id="strip-force-flags",
@@ -377,6 +406,12 @@ def init_default_rules() -> None:
             description="Strip sudo prefix from commands",
             applies_to=_neutralize_sudo_applies,
             transform=_neutralize_sudo_transform,
+        ),
+        RewriteRule(
+            rule_id="redact-pii",
+            description="Auto-redact PII (SSNs, emails, phones, etc.) in tool arguments",
+            applies_to=_redact_pii_applies,
+            transform=_redact_pii_transform,
         ),
     ]
     for rule in rules:

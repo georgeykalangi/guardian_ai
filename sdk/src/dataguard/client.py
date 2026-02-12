@@ -15,10 +15,14 @@ from dataguard.exceptions import (
     ToolBlocked,
 )
 from dataguard.models import (
+    AuditLogEntry,
+    AuditQuery,
     DecisionVerdict,
     EvaluateRequest,
     GuardianDecision,
     OutcomeReport,
+    PolicySpec,
+    StatsSummary,
     ToolCallContext,
     ToolCallProposal,
     ToolCategory,
@@ -209,6 +213,55 @@ class GuardianClient:
         resp.raise_for_status()
         return GuardianDecision.model_validate(resp.json())
 
+    async def get_policy(self) -> PolicySpec:
+        """Fetch the currently active policy."""
+        resp = await self._request_with_retry("get", "/v1/policies/active")
+        resp.raise_for_status()
+        return PolicySpec.model_validate(resp.json())
+
+    async def update_policy(self, policy: PolicySpec) -> PolicySpec:
+        """Replace the active policy (requires admin role)."""
+        resp = await self._request_with_retry(
+            "put", "/v1/policies/active", json=policy.model_dump(mode="json")
+        )
+        resp.raise_for_status()
+        return PolicySpec.model_validate(resp.json())
+
+    async def query_audit(
+        self,
+        *,
+        tenant_id: str | None = None,
+        agent_id: str | None = None,
+        verdict: str | None = None,
+        tool_name: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[AuditLogEntry]:
+        """Query audit logs with optional filters."""
+        query = AuditQuery(
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            verdict=verdict,
+            tool_name=tool_name,
+            limit=limit,
+            offset=offset,
+        )
+        resp = await self._request_with_retry(
+            "post",
+            "/v1/audit/query",
+            json=query.model_dump(mode="json", exclude_none=True),
+        )
+        resp.raise_for_status()
+        return [AuditLogEntry.model_validate(entry) for entry in resp.json()]
+
+    async def get_stats(self, *, hours: int = 24) -> StatsSummary:
+        """Fetch decision summary stats."""
+        resp = await self._request_with_retry(
+            "get", "/v1/stats/summary", params={"hours": hours}
+        )
+        resp.raise_for_status()
+        return StatsSummary.model_validate(resp.json())
+
     async def aclose(self) -> None:
         if self._async_client and not self._async_client.is_closed:
             await self._async_client.aclose()
@@ -260,6 +313,20 @@ class GuardianClient:
         resp.raise_for_status()
         decision = GuardianDecision.model_validate(resp.json())
         return self._handle_verdict(decision)
+
+    def get_policy_sync(self) -> PolicySpec:
+        """Fetch the currently active policy (sync)."""
+        resp = self._request_with_retry_sync("get", "/v1/policies/active")
+        resp.raise_for_status()
+        return PolicySpec.model_validate(resp.json())
+
+    def get_stats_sync(self, *, hours: int = 24) -> StatsSummary:
+        """Fetch decision summary stats (sync)."""
+        resp = self._request_with_retry_sync(
+            "get", "/v1/stats/summary", params={"hours": hours}
+        )
+        resp.raise_for_status()
+        return StatsSummary.model_validate(resp.json())
 
     def close(self) -> None:
         if self._sync_client and not self._sync_client.is_closed:

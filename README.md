@@ -629,8 +629,9 @@ agentic_ai/
     engine/
       orchestrator.py            # DecisionOrchestrator (core decision logic)
       policy_evaluator.py        # Deterministic first-match-wins rule engine
-      rewriter.py                # 10 rewrite transforms + registry
+      rewriter.py                # 11 rewrite transforms + registry
       risk_scorer.py             # BaseRiskScorer interface + StubRiskScorer
+      detectors.py               # Shared PII (12 patterns) + injection (11 patterns) detection
     api/v1/
       guardian.py                # POST /evaluate, /evaluate-batch, /approve, /report-outcome
       policies.py                # GET/PUT /policies/active
@@ -641,31 +642,37 @@ agentic_ai/
       session.py                 # Async session factory
       repositories/
         audit_repo.py            # Audit log persistence + queries
-  tests/                         # 55 tests
+  tests/                         # 198 tests
 ```
 
 ## Roadmap
 
-### v1.0 (current)
+### v1.0
 - [x] Deterministic policy engine (first-match-wins JSON rules)
-- [x] 10 rewrite transforms
-- [x] Heuristic risk scoring (PII, prompt injection, category risk)
+- [x] 11 rewrite transforms (including auto PII redaction)
+- [x] Heuristic risk scoring — 12 PII patterns, 11 injection patterns
 - [x] Approval flow for human-in-the-loop
 - [x] Multi-tenancy support (`tenant_id` on every request)
-- [x] 55-test safety regression suite
 
-### v1.1 (next)
-- [ ] Persistent audit logs (Postgres integration)
-- [ ] Python SDK (`pip install dataguard-sdk`) with `@guard` decorator
-- [ ] LangChain / CrewAI middleware adapters
-- [ ] LLM-backed risk scorer (Anthropic Claude)
+### v1.1 (current)
+- [x] Persistent audit logs (Postgres + Alembic migrations)
+- [x] Python SDK (`pip install dataguard-sdk`) with `@guard` decorator
+- [x] LangChain middleware adapters
+- [x] LLM-backed risk scorer (Anthropic Claude)
+- [x] RBAC (admin / agent roles) and API key auth
+- [x] Rate limiting per API key
+- [x] Admin dashboard with approval UI
+- [x] Prompt injection detection → `require_approval` (score 65+)
+- [x] PII auto-redaction rewrite rule
+- [x] SDK methods for policy, audit, and stats APIs
+- [x] 198-test regression suite (server) + 66 SDK tests
 
 ### v2.0
 - [ ] Policy inheritance (org -> team -> project)
-- [ ] Dashboard (runs list, run detail, policy editor)
 - [ ] Policy simulation ("what-if" analysis on past traces)
 - [ ] Risk drift monitoring (alert on score distribution changes)
 - [ ] Webhook notifications for deny/approval events
+- [ ] OpenAI risk scorer provider
 
 ## License
 
